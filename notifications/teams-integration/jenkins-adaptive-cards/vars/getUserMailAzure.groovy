@@ -13,5 +13,5 @@ def call(String userFullName) {
         userInfo = client.findUserByDisplayName(userFullName)
     }
 
-    return userInfo.mail
+    return userInfo?.mail
 }

@@ -22,12 +22,12 @@ class ApiUtils {
 
             if (!email) {
                 println "[⚠️ extractUser] Email not found in Azure for user: '${name}'"
+                email = user.name
             } else {
                 println "✅ Email found: ${name} → ${email}"
-                fieldUsers << [name: name, email: email]
             }
         }
 
-        return fieldUsers
+        return fieldUsers << [name: name, email: email]
     }
 }
