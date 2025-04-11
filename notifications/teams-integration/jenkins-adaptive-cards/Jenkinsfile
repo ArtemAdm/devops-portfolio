@@ -1,0 +1,210 @@
+// NOTE: All email addresses, URLs, and token names in this example are fictional and used only for demonstration purposes.
+
+// Jenkins pipeline for backend deployment
+// Features:
+// - Git checkout with branch param
+// - CI/CD step skeleton
+// - Integration with Adaptive Card notifications (MS Teams)
+// - Uses shared Jenkins library (jenkins-shared-library)
+
+@Library('jenkins-shared-library') _
+
+import hudson.model.User
+import hudson.tasks.Mailer
+
+def dockerImageTag
+def notificationTemplateValues
+
+def messageBody      = ''
+def changeLog        = []
+def changeLogFull    = []
+def personLead       = [ name: 'Lead Backend', email: 'lead-backend@myorg.com' ]
+def personsQa        = []
+def personsQaAll     = []
+def pipelineAuthor       = []
+def personsDevOps    = []
+def personsCommit    = []
+def personsCommitAll = []
+def personsNotify    = []
+def personsNotifyAll = []
+def fieldIssue = [
+    [fieldName: 'Notify',       tagUsers: personsNotifyAll],
+    [fieldName: 'QA Engineer',  tagUsers: personsQaAll]
+]
+
+pipeline {
+    agent {
+        label 'ec2-fleet'
+    }
+
+    options {
+        skipDefaultCheckout()
+    }
+
+    parameters {
+        choice(
+            choices: [
+                'stageEnv',
+                'devEnv',
+                'testEnv',
+                'preProdEnv'],
+            description: '',
+            name: 'deployEnv')
+        gitParameter(
+            branch: '',
+            branchFilter: 'origin/(.*)',
+            defaultValue: 'main',
+            description: '',
+            name: 'branchBe',
+            quickFilterEnabled: true,
+            selectedValue: 'DEFAULT',
+            sortMode: 'DESCENDING_SMART',
+            tagFilter: '*',
+            useRepository: '.*my-backend.git',
+            type: 'PT_BRANCH')
+        booleanParam(
+            defaultValue: false,
+            description: '',
+            name: 'cleanDB')
+        booleanParam(
+            defaultValue: false,
+            description: '',
+            name: 'skipTests')
+        booleanParam(
+            defaultValue: true,
+            description: '',
+            name: 'skipSonarQube')
+    }
+
+    environment {
+        PROJECT_NAME                = 'my-backend'
+        GIT_CREDENTIALS_ID          = 'GIT_CREDENTIALS'
+        GIT_APP_URL                 = 'https://git.example.com/myorg/my-backend.git'
+        SENTRY_PROJ_URL             = "https://sentry.io/organizations/projects/my-backend"
+        GRAFANA_PROJ_URL            = 'https://grafana.example.com/d/demo123abc/my-backend-logs'
+        ARGOCD_PROJ_URL             = 'https://argocd.example.com/applications'
+        YOUTRACK_URL                = 'https://example.youtrack.cloud'
+        GIT_URL                     =  env.GIT_APP_URL.replace('.git', '')
+
+        MSTEAMS_WEBHOOK             = 'MSTEAMS_DEPLOY_TOKEN'
+    }
+
+    stages {
+        stage('init') {
+            steps {
+                checkout poll: false,
+                changelog: true,
+                scm: [
+                    $class: 'GitSCM',
+                    branches: [[name: "refs/heads/${params.branchBe}"]],
+                    extensions: [[$class: 'WipeWorkspace']],
+                    userRemoteConfigs:
+                        [[credentialsId: "${GIT_CREDENTIALS_ID}", url: "${GIT_APP_URL}"]]
+                ]
+
+                script {
+                    currentBuild.keepLog = true
+
+                    dockerImageTag = getBranchSlug("${params.deployEnv}") + '-' + "${getGitCommitHash()}"
+                    def changeSets  = currentBuild.changeSets
+
+                    def result = processCommits(
+                        changeSets,
+                        GIT_URL,
+                        YOUTRACK_URL,
+                        fieldIssue,
+                        personsQaAll,
+                        personsNotifyAll,
+                        personsCommitAll
+                    )
+
+                    changeLogFull = result.changeLog
+                    pipelineAuthor = getPipelineUser(params, env, currentBuild)
+
+                    notificationTemplateValues = initNotificationTemplate([
+                        'grafanaUrl'        : env.GRAFANA_PROJ_URL,
+                        'argocdUrl'         : env.ARGOCD_PROJ_URL,
+                        'sentryUrl'         : env.SENTRY_PROJ_URL,
+                        'messageHeader'     : "[BE][${params.deployEnv}] ${env.PROJECT_NAME} new deploy",
+                    ])
+                }
+            }
+            post {
+                always {
+                    script {
+                        currentBuild.displayName = "#${BUILD_ID}: Branch: ${params.branchBe}"
+                        currentBuild.description = "Author: ${pipelineAuthor.name}<br>Docker Image: ${dockerImageTag}"
+                    }
+                }
+            }
+        }
+        stage('deploy') {
+            steps {
+                echo "Stage: ${STAGE_NAME}"
+                // error("Brocken ${STAGE_NAME}")
+            }
+            post {
+                failure {
+                    script {
+                        messageBody = "⚠️ **Failed on stage**: ${STAGE_NAME}"
+                    }
+                }
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                personsDevOps.add([ name: 'Devops Name', email: 'devops-mail@myorg.com'])
+                messageBody += getFailedReason(currentBuild)
+
+                try {
+                    setNotificationTemplate(env, notificationTemplateValues, currentBuild, [
+                        pipelineAuthor   : pipelineAuthor,
+                        personLead       : personLead,
+                        personsQa        : personsQa,
+                        personsDevOps    : personsDevOps,
+                        personsCommit    : personsCommit,
+                        personsNotify    : personsNotify,
+                        channelId        : 'teamsDeployCard',
+                        messageBody      : messageBody,
+                    ])
+                } catch (Exception e) {
+                    setNotificationTemplate(env, notificationTemplateValues, currentBuild, [
+                        messageBody      : messageBody,
+                        personPipe       : personPipe,
+                        personsDevOps    : personsDevOps,
+                        channelId        : 'teamsDeployCard'
+                    ])
+                }
+            }
+        }
+        success {
+            script {
+                if (params.deployEnv == 'stageEnv') {
+                    personsQa.add([ name: 'Lead Qa', email: 'lead-qa@myorg.com'])
+                    personsQa.addAll(personsQaAll)
+                    personsCommit.addAll(personsCommitAll)
+                    changeLog = changeLogFull
+                }
+
+                personsNotify.addAll(personsNotifyAll)
+
+                setNotificationTemplate(env, notificationTemplateValues, currentBuild, [
+                    pipelineAuthor   : pipelineAuthor,
+                    personLead       : personLead,
+                    personsQa        : personsQa,
+                    personsDevOps    : personsDevOps,
+                    personsCommit    : personsCommit,
+                    personsNotify    : personsNotify,
+                    channelId        : 'teamsDeployCard',
+                    changeLog        : changeLog,
+                    messageBody      : "- 🐳 **Docker image tag**: ${dockerImageTag}\n- 💣 **CleanDB**: ${params.cleanDB}\n- 📦**mavenProfiles**: ${params.mavenProfiles}\n- 🧪 **skipTests**: ${params.skipTests}\n- 📊 **skipSonarQube**: ${params.skipSonarQube}"
+                ])
+            }
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

@@ -1,0 +1,87 @@
+{
+    "type": "message",
+    "attachments": [
+        {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "type": "AdaptiveCard",
+                "\$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "version": "1.6",
+                "body": [
+                    {
+                        "type": "ColumnSet",
+                        "columns": [
+                            {
+                                "type": "Column",
+                                "items": [
+                                    {
+                                        "type": "TextBlock",
+                                        "id": "buildStatus",
+                                        "text": "${buildStatus == 'SUCCESS' ? '✅' : '❌'}",
+                                        "size": "extraLarge",
+                                        "weight": "bolder"
+                                    }
+                                ],
+                                "width": "auto",
+                                "style": "${buildStatus == 'SUCCESS' ? 'good' : 'attention'}",
+                                "bleed": true
+                            },
+                            {
+                                "type": "Column",
+                                "items": [
+                                    {
+                                        "type": "TextBlock",
+                                        "text": "${messageHeader}",
+                                        "weight": "bolder",
+                                        "size": "large",
+                                        "color": "default",
+                                        "wrap": true
+                                    }
+                                ],
+                                "width": "stretch",
+                                "style": "${buildStatus == 'SUCCESS' ? 'good' : 'attention'}",
+                                "bleed": true,
+                                "spacing": "None"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "TextBlock",
+                        "id": "who-did-what",
+                        "text": "${messageMentionSummary}",
+                        "wrap": true
+                    },
+                    {
+                        "type": "TextBlock",
+                        "id": "docker-image-tag",
+                        "text": "${messageBody}",
+                        "wrap": true,
+                        "separator": true
+                    },
+                    {
+                        "type": "TextBlock",
+                        "id": "duration-time",
+                        "text": "${messageDurationTime}",
+                        "wrap": true,
+                        "separator": true
+                    },
+                    {
+                        "type": "TextBlock",
+                        "id": "last-commit",
+                        "text": "${messageLastCommit ?: ''}",
+                        "wrap": true,
+                        "separator": true,
+                        "isVisible": ${messageLastCommit != null && messageLastCommit != ''}
+                    },
+                    {
+                        "type": "ActionSet",
+                        "actions": ${actions}
+                    }
+                ],
+                "msteams": {
+                    "entities": ${jsonEntities}
+                }
+            }
+        }
+    ]
+}
